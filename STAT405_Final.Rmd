@@ -1,0 +1,342 @@
+---
+title: "STAT405 Final Project"
+author: "Rui Qiao"
+date: "6/19/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Final Project Proposal
+
+The data is downloaded from Kaggle competition “Instacart Market Basket Analysis” (https://www.kaggle.com/c/instacart-market-basket-analysis). The main purpose of the competition is developing models to predict “which products a user will buy again, try for the first time, or add to their cart next during a session.” In this project, I will do the exploratory analysis to prepare for further modeling.
+
+### Read in the data
+```{r message=FALSE, warning=FALSE, results='hide'}
+setwd("/Users/Rachel/Desktop/Instacart_Data")
+
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(DT)
+
+aisles <- fread('aisles.csv')
+departments <- fread('departments.csv')
+order_products_prior <- fread('order_products__prior.csv')
+order_products <- fread('order_products__train.csv')
+orders <- fread('orders.csv')
+products <- fread('products.csv')
+
+```
+
+### Dataset details
+
+The source data have six data files that can be used for prediction.
+
+#### 1. Aisles
+
+The "asiles" dataset contains the different aisles and the associated ids.
+
+```{r, result='asis'}
+head(aisles,10)
+glimpse(aisles)
+```
+
+#### 2. Departments
+
+The "departments" dataset contains the different department names and the associated ids.
+
+
+```{r, result='asis'}
+head(departments,10)
+glimpse(departments)
+```
+
+
+#### 3. Products
+
+This dataset contains the names of the products names, thecorresponding product ids and the location information (the aisle and deparment ids).
+
+```{r}
+head(products,10)
+glimpse(products)
+```
+
+
+#### 4. Orders
+
+This dataset contains 7 variables with each contains information of one single order. The seven variables are order ids, user ids, whether the order is in prior (follewed by other orders from the same buyer) or train set (the last order of each user/ buyer that is used to do final predictions), the nth order of same user (the number of order in historical sequence by same buyer), order_dow which indicates what day it was when the order took place (not defined, i.e. assume Sunday = 0), the hour time when the hour took place in a day, and days since prior order. 
+
+```{r, result='asis'}
+head(orders,12)
+glimpse(orders)
+```
+
+
+#### 5. order_products_prior
+
+This dataset contains only the prior orders. Each row contains information for a single product that is purchased in a order. It has four variables, order ids, product ids, the add_to_cart_order which indicates the product is the nth product that is added to the order in that single order, and whther the product is reordered or not (reorder = 1, not = 0).
+
+```{r, result='asis'}
+head(order_products_prior,10)
+glimpse(order_products_prior)
+```
+
+
+#### 6. order_products_train
+
+This dataset contains only the train orders (the last order of each user/ buyer that is used to do final predictions). The data structure is similar to that of order_prodcts_prior dataset.
+
+```{r}
+head(order_products,10)
+glimpse(order_products)
+```
+
+
+
+### Variable Types
+
+We need to first change some variable types for further anlysis.
+
+```{r message=FALSE, warning=FALSE}
+orders <- orders %>% mutate(order_hour_of_day = as.numeric(order_hour_of_day), eval_set = as.factor(eval_set))
+products <- products %>% mutate(product_name = as.factor(product_name))
+aisles <- aisles %>% mutate(aisle = as.factor(aisle))
+departments <- departments %>% mutate(department = as.factor(department))
+```
+
+### I. Order Time
+
+Let's first look at 3 time information of the orders in the order dataset: day of the week (order_dow), hour of the day (order_hour_of_day), and when people order again (days_since_the_prior_order).
+
+#### 1. Day of Week
+
+Most orders took place on days 0 and 1 of the week. Though not known, I suppose it refers to Sunday and Monday.
+
+```{r warning=FALSE}
+orders %>% 
+  ggplot(aes(x=order_dow)) + 
+  geom_histogram(stat="count")
+```
+
+
+#### 2. Hour of Day
+
+Most orders are between 8 am- 6pm, which is the typical work / day time.
+
+```{r warning=FALSE}
+orders %>% 
+  ggplot(aes(x=order_hour_of_day)) + 
+  geom_histogram(stat="count")
+```
+
+
+#### 3. Days Since Prior Order
+
+From the chart, we can see that the highest bar is 30. However, as the trend shows, 30 is very likely indicates all the orders that reordered in 30 and more than 30 days. Since it is a cumulative result, 30 is not the most frequent days since the prior order. Note that it needs to be treated carefully in further analysis. 
+
+People seem to reorder more often after exactly 1 week. 
+
+```{r warning=FALSE}
+orders %>% 
+  ggplot(aes(x=days_since_prior_order)) + 
+  geom_histogram(stat="count")
+```
+
+
+### II. Products Ordered
+
+In this section, I want to investgate the products ordered in three ways: the number of items in an order, the most frequently bought products, and which products are often placed in the cart first in an order if puchased.
+
+#### 1. How many items are in a order?
+
+From the charts of both train and prior order datasets, we can see the comparable results that people most often order around 5 items
+
+##### a. Train dataset
+```{r warning=FALSE}
+order_products %>% 
+  group_by(order_id) %>% 
+  summarize(n_items = last(add_to_cart_order)) %>%
+  ggplot(aes(x=n_items))+
+  geom_histogram(stat="count")+
+  coord_cartesian(xlim=c(0,80))
+```
+
+##### b. Prior order dataset
+```{r warning=FALSE}
+order_products_prior %>% 
+  group_by(order_id) %>% 
+  summarize(n_items = last(add_to_cart_order)) %>%
+  ggplot(aes(x=n_items))+
+  geom_histogram(stat="count")+
+  coord_cartesian(xlim=c(0,80))
+```
+
+
+#### 2. Which products are sold most often?
+
+The top 12 bestsellers are shown in the below table and chart. "Banana" is the most ordered items.
+
+```{r}
+tmp <-order_products %>% 
+  group_by(product_id) %>% 
+  summarize(count = n()) %>% 
+  top_n(12, wt = count) %>%
+  left_join(select(products,product_id,product_name),by="product_id") %>%
+  arrange(desc(count)) 
+
+tmp
+
+tmp %>% 
+  ggplot(aes(x=reorder(product_name,-count), y=count))+
+  geom_bar(stat="identity")+
+  theme(axis.text.x=element_text(angle=90, hjust=1),axis.title.x = element_blank())
+
+```
+
+#### 3. Which products are often put into the cart first if puchased?
+
+"White Multifold Towels" has the highest rate (66% of the time )of being placed in the cart first in the order. It may indicates it is primary need for those orders and buyers are certain that they want this particular item.
+
+```{r message=FALSE, fig.height=5.5}
+tmp <- order_products %>% 
+  group_by(product_id, add_to_cart_order) %>% 
+  summarize(count = n()) %>% mutate(pct=count/sum(count)) %>% 
+  filter(add_to_cart_order == 1, count>10) %>% 
+  arrange(desc(pct)) %>% 
+  left_join(products,by="product_id") %>% 
+  select(product_name, pct, count) %>% 
+  ungroup() %>% 
+  top_n(10, wt=pct)
+
+tmp
+
+tmp %>% 
+  ggplot(aes(x=reorder(product_name,-pct), y=pct))+
+  geom_bar(stat="identity")+
+  theme(axis.text.x=element_text(angle=90, hjust=1),axis.title.x = element_blank())+coord_cartesian(ylim=c(0.4,0.7))
+
+```
+
+
+### III. Reorder
+
+In this section, I would like to see three things: the overall reorder rate, the most often reordered products, and loyal customers.
+
+
+#### 1. Reorder Rate
+
+About 60% of the ordered items are reorders.
+
+```{r warning=FALSE, fig.width=4}
+tmp <- order_products %>% 
+  group_by(reordered) %>% 
+  summarize(count = n()) %>% 
+  mutate(reordered = as.factor(reordered)) %>%
+  mutate(proportion = count/sum(count))
+
+tmp
+  
+tmp %>% 
+  ggplot(aes(x=reordered,y=count,fill=reordered))+
+  geom_bar(stat="identity")
+
+```
+
+
+#### 2. Most Often Reordered Products
+
+These are top 102 products have the highest probability of being reordered.
+
+Notice how this is different than the bestsellers. The difference may indicates the comparative advantages of certain products in Instcart than those sold in other places. Certain actions can be taken based on the inference here to increase sales and customer satisfaction.
+
+```{r warning=FALSE, fig.height=5.5}
+tmp <-order_products %>% 
+  group_by(product_id) %>% 
+  summarize(proportion_reordered = mean(reordered), n=n()) %>% 
+  filter(n>40) %>% 
+  top_n(12,wt=proportion_reordered) %>% 
+  arrange(desc(proportion_reordered)) %>% 
+  left_join(products,by="product_id")
+
+tmp
+
+tmp %>% 
+  ggplot(aes(x=reorder(product_name,-proportion_reordered), y=proportion_reordered))+
+  geom_bar(stat="identity")+
+  theme(axis.text.x=element_text(angle=90, hjust=1),axis.title.x = element_blank())+coord_cartesian(ylim=c(0.85,0.95))
+```
+
+#### 3. Loyal Customers
+
+Here the loyal customers refer to customers that reorder very often (not by looking at the total order numbers). This data is valuable because Instacart can send certain targeting promotions to these customers to increase their loyalty and increase sales with less waste of promotion fees. For example, for a frequent milk buyer, the Instacart may provide discounts for buying eggs with milk. The buyer may become a frequent egg buyer later too.
+
+
+```{r}
+
+tmp <- order_products_prior %>% 
+  group_by(order_id) %>% 
+  summarize(m = mean(reordered),n=n()) %>% 
+  right_join(filter(orders,order_number>2), by="order_id")
+
+tmp2 <- tmp %>% 
+  filter(eval_set =="prior") %>% 
+  group_by(user_id) %>% 
+  summarize(n_equal = sum(m==1,na.rm=T), percent_equal = n_equal/n()) %>% 
+  filter(percent_equal == 1) %>% 
+  arrange(desc(n_equal))
+
+datatable(tmp2, class="table-condensed", style="bootstrap", options = list(dom = 'tp'))
+
+```  
+
+
+### IV. Product Portfolio Visualization
+
+( Note the codes in this section are copied from a kernel post in Kaggle competition. I have't learned it before, but think it is very useful in this analysis and could not think of any substitude method. It is hard for me to provide better codes. Therefore I just copied codes and do not take the below content as my own work. But I've carefully studied and fully understand all the code contents.)
+
+Now I want to use treemap package to visualize the structure of instacarts product portfolio. There are 21 departments containing 134 aisles. 
+
+```{r}
+library(treemap)
+
+tmp <- products %>% group_by(department_id, aisle_id) %>% summarize(n=n())
+tmp <- tmp %>% left_join(departments,by="department_id")
+tmp <- tmp %>% left_join(aisles,by="aisle_id")
+
+tmp2<-order_products %>% 
+  group_by(product_id) %>% 
+  summarize(count=n()) %>% 
+  left_join(products,by="product_id") %>% 
+  ungroup() %>% 
+  group_by(department_id,aisle_id) %>% 
+  summarize(sumcount = sum(count)) %>% 
+  left_join(tmp, by = c("department_id", "aisle_id")) %>% 
+  mutate(onesize = 1)
+
+```
+
+#### 1. How are aisles organized within departments?
+```{r}
+treemap(tmp2,index=c("department","aisle"),vSize="onesize",vColor="department",palette="Set3",title="",sortID="-sumcount", border.col="#FFFFFF",type="categorical", fontsize.legend = 0,bg.labels = "#FFFFFF")
+```
+
+#### 2. How many unique products are offered in each department/aisle
+The size of the boxes shows the number of products in each category. 
+```{r, fig.width=9, fig.height=6}
+treemap(tmp,index=c("department","aisle"),vSize="n",title="",palette="Set3",border.col="#FFFFFF")
+```
+
+#### 3. How often are products from the department/aisle sold?
+The size of the boxes shows the number of sales. 
+```{r, fig.width=9, fig.height=6}
+treemap(tmp2,index=c("department","aisle"),vSize="sumcount",title="",palette="Set3",border.col="#FFFFFF")
+```
+
+
+## End Notes:
+
+So far I have down exploratory analysis on four various aspects. The results indicate before jumping into modeling, I may need to do more feature engineering. Examples that I should take further looks at can be the treatments of 30 in days_since_prior_order, the frequently bought or reordered items.
