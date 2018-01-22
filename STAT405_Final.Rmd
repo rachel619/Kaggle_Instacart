@@ -29,8 +29,7 @@ order_products_prior <- fread('order_products__prior.csv')
 order_products <- fread('order_products__train.csv')
 orders <- fread('orders.csv')
 products <- fread('products.csv')
-# test change 1
-#test change 2
+
 ```
 
 ### Dataset details
