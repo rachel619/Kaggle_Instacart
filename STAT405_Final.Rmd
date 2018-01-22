@@ -7,7 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-#test
+
 ```
 
 ## Final Project Proposal
@@ -30,7 +30,7 @@ order_products_prior <- fread('order_products__prior.csv')
 order_products <- fread('order_products__train.csv')
 orders <- fread('orders.csv')
 products <- fread('products.csv')
-#tste
+
 ```
 
 ### Dataset details
